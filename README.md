@@ -15,9 +15,9 @@
 | **5 Power-up Chaos** | Kulit pisang, roket kartun, bom air, tumpahan oli, dan perisai. |
 | **Collision Physics & Destructible Objects** | Tabrakan dengan pantulan, guling, dan puluhan properti yang dapat dihancurkan (kardus detail, pagar kayu, gerobak bakso + penjualnya, tong, tiang, pot tanaman, traffic cone, motor & sepeda terparkir) dengan efek kardus dan kertas melayang. |
 | **Dynamic Obstacles & Jalanan Hidup** | Angkot Suzuki Carry ("ANGKOT 99" pintu tengah terbuka), ayam kampung, lampu lalu lintas Merah-Kuning-Hijau yang bisa diterobos, polisi tidur (speedbump), serta pejalan kaki pria dan wanita yang berlari menghindar. |
-| **Shortcut & Battle Arena** | Jalur pintas menembus taman kota, plus mode **Battle Arena** saling menghancurkan antar 8 gokart. |
+| **Shortcut & Battle Arena (Ring-Out)** | Jalur pintas menembus taman kota, plus mode **Battle Arena** 8 gokart dengan aturan Ring-Out (terlempar keluar arena = langsung kalah). |
 | **Replay System** | Merekam momen tabrakan dan balapan untuk diputar ulang dari kamera sinematik (`V`). |
-| **21 Aset Audio Realistis (ElevenLabs)** | Dual-layer suara mesin (`engine_idle` + `engine_loop` crossfade dinamis), suara angin kecepatan tinggi, kicau burung tropis, klakson kendaraan & klakson Telolet, suara tabrakan, ayam teriak, teriakan warga pria/wanita, jingle intro game, dan efek power-up. |
+| **23 Aset Audio Realistis (ElevenLabs)** | Dual-layer suara mesin gapless `.ogg` (`engine_idle` vs `engine_loop` stabil sesuai kecepatan), suara angin kecepatan tinggi, kicau burung tropis, klakson kendaraan & klakson Telolet, suara peluncuran & ledakan roket, tabrakan, ayam teriak, teriakan warga pria/wanita, jingle intro game, dan efek power-up. |
 
 ## Kontrol
 
@@ -68,7 +68,7 @@ Buka `http://127.0.0.1:8060/` di browser.
 
 - `assets/models/`: 30+ model 3D `.glb` hasil ekspor Blender (Bajaj Turbo Kart, Angkot 99, Ruko Indomaret/Alfamart/Kafe, Kios Buah, Gedung Kantor, Rumah Nusantara, Gerobak Bakso, Pohon, Palem, Pejalan Kaki, Motor/Sepeda, Power-up).
 - `assets/textures/`: Tekstur PBR (Albedo, Normal, Roughness) termasuk aspal kerikil, batu paving trotoar, tembok ruko, dan plang lokal.
-- `assets/audio/`: 21 file audio `.mp3` 44.1 kHz (ElevenLabs `eleven_text_to_sound_v2`) dengan fallback sintesis prosedural di `scripts/sfx_synth.gd`.
+- `assets/audio/`: 23 file audio 44.1 kHz (21 `.mp3` + 2 loop gapless `.ogg` mesin dari ElevenLabs `eleven_text_to_sound_v2`) dengan fallback sintesis prosedural di `scripts/sfx_synth.gd`.
 - `assets/blend/`: File sumber Blender (`bajaj_kart.blend`, `nusantara_assets.blend`).
 - `scenes/`: `main_menu.tscn` (Garage 3D), `race_track.tscn` (Chaos Racing), `battle_arena.tscn` (Battle Arena), dan `verify_smoke.tscn`.
 - `scripts/`: Skrip GDScript untuk fisika kart, AI, dunia & rintangan, audio, replay, dan UI.
