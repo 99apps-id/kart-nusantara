@@ -948,6 +948,7 @@ func trigger_powerup(parent: Node3D, kart: KartController, item_type: String) ->
 			parent.add_child(o)
 			active_hazards.append({"node": o, "kind": "oil", "owner": kart, "arm": 0.6, "radius": 2.1})
 		"rocket":
+			ComedySfx.play(parent, "rocket_launch", -4.5 if kart.is_player else -11.0)
 			var r := get_model(P_ROCKET).instantiate() as Node3D
 			r.position = kart.global_position + fwd * 2.4 + Vector3(0.0, 0.7, 0.0)
 			r.rotation = kart.global_rotation
@@ -1138,8 +1139,8 @@ func _tick_projectiles(parent: Node3D, delta: float) -> void:
 				var dir := vel.normalized()
 				k.apply_knockback_flip(dir * 18.0 + Vector3(0, 11.0, 0), p["owner"])
 				spawn_flying_chaos_burst(parent, k.global_position, true)
-				spawn_comic_popup(parent, k.global_position, "DUAAR!! TERBANG!", Color(1.0, 0.35, 0.12))
-				ComedySfx.play(parent, "boom", -5.0)
+				spawn_comic_popup(parent, k.global_position, "DUAAR!! ROKET MELEDAK!", Color(1.0, 0.35, 0.12))
+				ComedySfx.play(parent, "rocket_explosion", -2.5 if (k.is_player or _near_player(k.global_position, 45.0)) else -9.0)
 				if k.is_player: k.add_camera_shake(0.75)
 				node.queue_free()
 				to_remove.append(p)

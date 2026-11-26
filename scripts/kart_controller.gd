@@ -121,6 +121,8 @@ var crash_sfx_cd: float = 0.0
 var engine_player: AudioStreamPlayer
 var engine_idle_player: AudioStreamPlayer
 var wind_player: AudioStreamPlayer
+var engine_rpm_smooth: float = 0.0
+var engine_run_blend: float = 0.0
 
 
 func setup_kart(cfg: Dictionary, player_flag: bool, battle_flag: bool = false) -> void:
@@ -259,7 +261,7 @@ func _build_nodes(cfg: Dictionary) -> void:
 		engine_idle_player = AudioStreamPlayer.new()
 		engine_idle_player.name = "EngineIdleAudio"
 		engine_idle_player.stream = ComedySfx.get_stream("engine_idle")
-		engine_idle_player.volume_db = -10.5
+		engine_idle_player.volume_db = -9.0
 		engine_idle_player.pitch_scale = 0.96
 		engine_idle_player.autoplay = true
 		add_child(engine_idle_player)
@@ -267,8 +269,8 @@ func _build_nodes(cfg: Dictionary) -> void:
 		engine_player = AudioStreamPlayer.new()
 		engine_player.name = "EngineAudio"
 		engine_player.stream = ComedySfx.get_stream("engine_loop")
-		engine_player.volume_db = -26.0
-		engine_player.pitch_scale = 0.76
+		engine_player.volume_db = -60.0
+		engine_player.pitch_scale = 0.68
 		engine_player.autoplay = true
 		add_child(engine_player)
 
@@ -393,6 +395,7 @@ func _physics_process(delta: float) -> void:
 		velocity.x = move_toward(velocity.x, 0.0, delta * 6.0)
 		velocity.z = move_toward(velocity.z, 0.0, delta * 6.0)
 		move_and_slide()
+		_update_engine_audio(delta)
 		if flip_timer <= 0.0:
 			visual_root.rotation = Vector3.ZERO
 		return
@@ -405,6 +408,7 @@ func _physics_process(delta: float) -> void:
 		velocity.x = fwd_s.x * forward_speed
 		velocity.z = fwd_s.z * forward_speed
 		move_and_slide()
+		_update_engine_audio(delta)
 		if spinout_timer <= 0.0:
 			visual_root.rotation = Vector3.ZERO
 		return
@@ -548,33 +552,57 @@ func _update_engine_audio(delta: float) -> void:
 		engine_idle_player.play()
 	if wind_player != null and not wind_player.playing and wind_player.stream != null:
 		wind_player.play()
-	var speed_ratio: float = clampf(absf(forward_speed) / maxf(max_speed, 1.0), 0.0, 1.45)
-	var load_ratio: float = clampf(speed_ratio * 0.85 + (0.35 if current_throttle_input > 0.1 else 0.0) + (0.35 if nitro_active else 0.0), 0.0, 1.2)
-	var throttle_boost: float = 0.18 if current_throttle_input > 0.1 else (0.08 if current_brake_input > 0.1 and forward_speed < -0.5 else 0.0)
-	var target_pitch: float = 0.72 + speed_ratio * 1.15 + throttle_boost
-	if nitro_active:
-		target_pitch += 0.34
-	elif is_drifting:
-		target_pitch += 0.09 + sin(Time.get_ticks_msec() * 0.04) * 0.03
-	if not is_on_floor():
-		target_pitch += 0.12
-	# Crossfade: warm idle purr at low speed -> roaring racing engine under acceleration
-	if engine_idle_player != null:
-		var idle_vol: float = lerpf(-9.5, -26.0, clampf(load_ratio * 1.35, 0.0, 1.0))
-		var idle_pitch: float = 0.94 + speed_ratio * 0.30 + (0.08 if current_throttle_input > 0.1 else 0.0)
-		engine_idle_player.volume_db = lerpf(engine_idle_player.volume_db, idle_vol, clampf(delta * 7.0, 0.0, 1.0))
-		engine_idle_player.pitch_scale = lerpf(engine_idle_player.pitch_scale, clampf(idle_pitch, 0.85, 1.4), clampf(delta * 8.0, 0.0, 1.0))
-	var roar_vol: float = lerpf(-26.0, -7.0, clampf(load_ratio, 0.0, 1.0)) + (1.8 if nitro_active else 0.0)
-	engine_player.pitch_scale = lerpf(engine_player.pitch_scale, clampf(target_pitch, 0.65, 2.35), clampf(delta * 9.0, 0.0, 1.0))
-	engine_player.volume_db = lerpf(engine_player.volume_db, clampf(roar_vol, -28.0, -4.5), clampf(delta * 8.0, 0.0, 1.0))
-	# Aerodynamic wind rushes past helmet as speed climbs
-	if wind_player != null:
-		var wind_factor: float = clampf((absf(forward_speed) - 6.0) / maxf(max_speed, 1.0), 0.0, 1.3)
-		var wind_vol: float = lerpf(-40.0, -10.5, clampf(wind_factor, 0.0, 1.0)) + (2.5 if nitro_active else 0.0)
-		var wind_pitch: float = 0.80 + wind_factor * 0.55 + (0.20 if nitro_active else 0.0)
-		wind_player.volume_db = lerpf(wind_player.volume_db, clampf(wind_vol, -42.0, -7.0), clampf(delta * 6.0, 0.0, 1.0))
-		wind_player.pitch_scale = lerpf(wind_player.pitch_scale, clampf(wind_pitch, 0.75, 1.65), clampf(delta * 6.0, 0.0, 1.0))
 
+	# Distinct Idle vs Running engine model driven steadily by actual speed (Up arrow / W)
+	var abs_speed: float = absf(forward_speed)
+	var speed_ratio: float = clampf(abs_speed / maxf(max_speed, 1.0), 0.0, 1.35)
+	var is_pressing_gas: bool = (not controls_locked) and (current_throttle_input > 0.1)
+
+	# Clean separation:
+	# - At standstill / idle (abs_speed <= 0.35): pure calm idle purr, running roar muted (-60 dB)
+	# - Smooth equal-power crossfade as kart rolls away (0.35 -> 6.5 m/s)
+	# - Once running (>= 6.5 m/s): idle fully muted (-60 dB), only steady speed-proportional roar plays
+	var target_blend: float = 0.0
+	if abs_speed > 0.35:
+		target_blend = smoothstep(0.35, 6.5, abs_speed)
+	elif is_pressing_gas:
+		target_blend = 0.12
+	engine_run_blend = lerpf(engine_run_blend, target_blend, clampf(delta * 6.5, 0.0, 1.0))
+
+	# Steady RPM tracks vehicle speed directly (small steady load offset while holding gas, no jitter/surges)
+	var target_rpm: float = speed_ratio
+	if is_pressing_gas and abs_speed > 0.35:
+		target_rpm += 0.04
+	if nitro_active:
+		target_rpm += 0.22
+	engine_rpm_smooth = lerpf(engine_rpm_smooth, target_rpm, clampf(delta * 5.5, 0.0, 1.0))
+
+	# Equal-power crossfade gains (linear -> dB) so transition has zero volume dip and clean mute at ends
+	var blend_clamped: float = clampf(engine_run_blend, 0.0, 1.0)
+	var idle_gain: float = cos(blend_clamped * PI * 0.5) * 0.36
+	var run_base_gain: float = lerpf(0.18, 0.44, clampf(engine_rpm_smooth, 0.0, 1.0))
+	if nitro_active:
+		run_base_gain *= 1.18
+	var run_gain: float = sin(blend_clamped * PI * 0.5) * run_base_gain
+
+	if engine_idle_player != null:
+		var idle_db: float = -60.0 if idle_gain < 0.002 else clampf(linear_to_db(idle_gain), -60.0, -7.5)
+		var idle_pitch: float = 0.95 + clampf(abs_speed / 8.0, 0.0, 0.16)
+		engine_idle_player.volume_db = idle_db
+		engine_idle_player.pitch_scale = lerpf(engine_idle_player.pitch_scale, idle_pitch, clampf(delta * 6.0, 0.0, 1.0))
+
+	var roar_db: float = -60.0 if run_gain < 0.002 else clampf(linear_to_db(run_gain), -60.0, -5.0)
+	var roar_pitch: float = clampf(0.68 + engine_rpm_smooth * 1.02, 0.65, 2.05)
+	engine_player.volume_db = roar_db
+	engine_player.pitch_scale = roar_pitch
+
+	# Aerodynamic wind rushes past helmet smoothly at higher speed
+	if wind_player != null:
+		var wind_factor: float = clampf((abs_speed - 8.0) / maxf(max_speed, 1.0), 0.0, 1.3)
+		var wind_vol: float = lerpf(-50.0, -11.5, clampf(wind_factor, 0.0, 1.0)) + (2.5 if nitro_active else 0.0)
+		var wind_pitch: float = 0.80 + wind_factor * 0.55 + (0.20 if nitro_active else 0.0)
+		wind_player.volume_db = lerpf(wind_player.volume_db, clampf(wind_vol, -50.0, -7.5), clampf(delta * 5.0, 0.0, 1.0))
+		wind_player.pitch_scale = lerpf(wind_player.pitch_scale, clampf(wind_pitch, 0.75, 1.75), clampf(delta * 5.0, 0.0, 1.0))
 
 func _handle_collisions() -> void:
 	for i in range(get_slide_collision_count()):

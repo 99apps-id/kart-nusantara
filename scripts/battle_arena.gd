@@ -19,6 +19,7 @@ var replay_cam: Camera3D
 var karts: Array = []
 var player_kart: KartController
 var match_ended: bool = false
+var player_ringed_out: bool = false
 
 var hud_hp_bar: ProgressBar
 var hud_alive_label: Label
@@ -58,13 +59,15 @@ func _build_arena() -> void:
 	var mat_floor := world_builder.make_pbr_mat(ChaosWorldBuilder.get_tex(ChaosWorldBuilder.PT_ASPHALT_A), ChaosWorldBuilder.get_tex(ChaosWorldBuilder.PT_ASPHALT_N), Vector3(0.0625, 0.0625, 0.0625), 0.96, Color(0.74, 0.77, 0.84), ChaosWorldBuilder.get_tex(ChaosWorldBuilder.PT_ASPHALT_R), 2.1)
 	var mat_rim := world_builder.make_pbr_mat(ChaosWorldBuilder.get_tex(ChaosWorldBuilder.PT_SIDEWALK_A), ChaosWorldBuilder.get_tex(ChaosWorldBuilder.PT_SIDEWALK_N), Vector3(0.12, 0.12, 0.12), 0.96, Color(0.82, 0.84, 0.88), ChaosWorldBuilder.get_tex(ChaosWorldBuilder.PT_SIDEWALK_R), 2.0)
 
-	# 76m x 76m Nusantara Market Square Battle Arena
-	world_builder.add_ground_slab(self, Vector3(0.0, -0.5, 0.0), Vector3(84.0, 1.0, 84.0), mat_floor)
-	# Arena boundary walls
-	world_builder.add_ground_slab(self, Vector3(0.0, 1.8, -38.0), Vector3(78.0, 3.6, 2.0), mat_rim)
-	world_builder.add_ground_slab(self, Vector3(0.0, 1.8, 38.0), Vector3(78.0, 3.6, 2.0), mat_rim)
-	world_builder.add_ground_slab(self, Vector3(-38.0, 1.8, 0.0), Vector3(2.0, 3.6, 78.0), mat_rim)
-	world_builder.add_ground_slab(self, Vector3(38.0, 1.8, 0.0), Vector3(2.0, 3.6, 78.0), mat_rim)
+	# 76m x 76m Nusantara Market Square Battle Arena (low 1.15m rim: normal driving stays in, big knockouts ring-out!)
+	world_builder.add_ground_slab(self, Vector3(0.0, -0.5, 0.0), Vector3(78.0, 1.0, 78.0), mat_floor)
+	# Visual low boundary curb/rim (1.15m high)
+	world_builder.add_ground_slab(self, Vector3(0.0, 0.58, -38.0), Vector3(78.0, 1.15, 1.8), mat_rim)
+	world_builder.add_ground_slab(self, Vector3(0.0, 0.58, 38.0), Vector3(78.0, 1.15, 1.8), mat_rim)
+	world_builder.add_ground_slab(self, Vector3(-38.0, 0.58, 0.0), Vector3(1.8, 1.15, 78.0), mat_rim)
+	world_builder.add_ground_slab(self, Vector3(38.0, 0.58, 0.0), Vector3(1.8, 1.15, 78.0), mat_rim)
+	# Ceiling cap so karts never float indefinitely into the sky
+	_add_invisible_barrier(Vector3(0.0, 14.5, 0.0), Vector3(100.0, 1.5, 100.0))
 
 	# Iconic Indonesian facades outside arena rim
 	world_builder.spawn_static_model(self, ChaosWorldBuilder.P_INDOMARET, Vector3(-16.0, 0.0, -42.5), 180.0)
@@ -173,6 +176,13 @@ func _build_hud() -> void:
 	replay_panel.anchor_top = 1.0; replay_panel.anchor_bottom = 1.0
 	replay_panel.offset_left = -280; replay_panel.offset_right = 280
 	replay_panel.offset_top = -105; replay_panel.offset_bottom = -35
+	var hint := Label.new()
+	hint.anchor_top = 1.0; hint.anchor_bottom = 1.0
+	hint.offset_left = 20; hint.offset_top = -34; hint.offset_right = 760
+	hint.text = "WASD/Panah: Setir | SPACE: Drift | Q: Nitro | E: Senjata | H: Klakson | T: Telolet | R: Reset | ESC: Garage"
+	hint.modulate = Color(0.95, 0.96, 1.0, 0.9)
+	cl.add_child(hint)
+
 	replay_panel.visible = false
 	cl.add_child(replay_panel)
 	var rbox := HBoxContainer.new()
@@ -194,7 +204,56 @@ func _pill(parent: Control, t: String, col: Color) -> Label:
 	return l
 
 
+const ARENA_RINGOUT_LIMIT := 38.6
+
+
+func _add_invisible_barrier(pos: Vector3, size: Vector3) -> void:
+	var sb := StaticBody3D.new()
+	sb.position = pos
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	col.shape = box
+	sb.add_child(col)
+	add_child(sb)
+
+
+func _physics_process(_delta: float) -> void:
+	if replay_sys != null and replay_sys.is_playing:
+		return
+	# Ring-Out Rule: any kart knocked outside the arena perimeter or falling off is immediately eliminated (kalah)!
+	for k in karts:
+		if not is_instance_valid(k) or k.hp <= 0.0:
+			continue
+		var p: Vector3 = k.global_position
+		if p.y > 12.5:
+			p.y = 12.5
+			k.velocity.y = minf(k.velocity.y, -2.0)
+			k.global_position = p
+		var out_of_bounds: bool = (absf(p.x) > ARENA_RINGOUT_LIMIT) or (absf(p.z) > ARENA_RINGOUT_LIMIT) or (p.y < -1.2)
+		if out_of_bounds:
+			# Eliminate immediately so the kart never floats endlessly outside the arena
+			k.hp = 0.0
+			k.controls_locked = true
+			k.velocity = Vector3.ZERO
+			k.forward_speed = 0.0
+			k.global_position = Vector3(clampf(p.x, -40.0, 40.0), maxf(p.y, 0.2), clampf(p.z, -40.0, 40.0))
+			if k == player_kart:
+				player_ringed_out = true
+			world_builder.spawn_comic_popup(self, k.global_position + Vector3(0.0, 1.8, 0.0), "KELUAR ARENA - RING OUT!", Color(1.0, 0.25, 0.2))
+			ComedySfx.play(self, "crash_heavy", -1.5)
+			k.emit_signal("kart_eliminated", k, k.last_attacker)
+
+
 func _process(delta: float) -> void:
+	if Input.is_action_just_pressed("reset_kart") and player_kart != null and player_kart.hp > 0.0:
+		player_kart.global_position = Vector3(0.0, 0.6, 20.0)
+		player_kart.velocity = Vector3.ZERO
+		player_kart.forward_speed = 0.0
+		player_kart.flip_timer = 0.0
+		player_kart.spinout_timer = 0.0
+		player_kart.look_at(Vector3(0.0, 0.6, 0.0), Vector3.UP)
+
 	if Input.is_action_just_pressed("ui_cancel"):
 		get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 		return
@@ -219,7 +278,10 @@ func _process(delta: float) -> void:
 	if not match_ended:
 		if player_kart.hp <= 0.0:
 			match_ended = true
-			hud_banner.text = "GOKART HANCUR! (KO: %d)" % player_kart.eliminations
+			if player_ringed_out:
+				hud_banner.text = "%s TERLEMPAR KELUAR ARENA - KALAH! (KO: %d)" % [player_kart.racer_name.to_upper(), player_kart.eliminations]
+			else:
+				hud_banner.text = "%s GOKART HANCUR - KALAH! (KO: %d)" % [player_kart.racer_name.to_upper(), player_kart.eliminations]
 			replay_panel.visible = true
 			replay_sys.start_replay()
 		elif alive <= 1:
@@ -235,5 +297,8 @@ func _on_powerup_used(kart: KartController, item_type: String) -> void:
 
 func _on_kart_eliminated(victim: KartController, attacker: KartController) -> void:
 	world_builder.spawn_flying_chaos_burst(self, victim.global_position, true)
-	if attacker != null:
+	victim.controls_locked = true
+	victim.velocity = Vector3.ZERO
+	victim.forward_speed = 0.0
+	if attacker != null and attacker != victim:
 		attacker.eliminations += 1

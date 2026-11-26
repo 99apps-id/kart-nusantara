@@ -6,14 +6,18 @@ static var _streams: Dictionary = {}
 
 
 static func _load_asset(sfx_name: String, loop: bool = false) -> AudioStream:
-	var path := "res://assets/audio/%s.mp3" % sfx_name
-	if ResourceLoader.exists(path):
-		var res := load(path)
-		if res is AudioStreamMP3:
-			(res as AudioStreamMP3).loop = loop
-			return res
-		if res is AudioStream:
-			return res as AudioStream
+	for ext in ["ogg", "mp3"]:
+		var path := "res://assets/audio/%s.%s" % [sfx_name, ext]
+		if ResourceLoader.exists(path):
+			var res := load(path)
+			if res is AudioStreamOggVorbis:
+				(res as AudioStreamOggVorbis).loop = loop
+				return res
+			if res is AudioStreamMP3:
+				(res as AudioStreamMP3).loop = loop
+				return res
+			if res is AudioStream:
+				return res as AudioStream
 	return null
 
 
@@ -46,6 +50,8 @@ static func _ensure_loaded() -> void:
 	_register("wind_loop", _gen_nitro(), true)
 	_register("birds_ambience", _gen_pickup(), true)
 	_register("horn_klakson", _gen_telolet())
+	_register("rocket_launch", _gen_nitro())
+	_register("rocket_explosion", _gen_boom())
 
 
 static func get_stream(sfx_name: String) -> AudioStream:

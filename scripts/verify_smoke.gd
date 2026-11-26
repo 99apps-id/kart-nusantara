@@ -77,27 +77,62 @@ func _run_checks() -> void:
 				inst.world_builder.dynamic_obstacles.size(), inst.world_builder.item_boxes.size()
 			])
 			var has_engine_audio: bool = (pk.find_child("EngineAudio", true, false) is AudioStreamPlayer) and (pk.find_child("EngineIdleAudio", true, false) is AudioStreamPlayer) and (pk.find_child("WindAudio", true, false) is AudioStreamPlayer) and (inst.find_child("BirdsAmbienceAudio", true, false) is AudioStreamPlayer)
-			var sfx_req := ["intro_fanfare", "countdown_beep", "race_go", "engine_idle", "engine_loop", "wind_loop", "birds_ambience", "horn_klakson", "crash_heavy", "crash_kart", "bonk", "chicken_scream", "ped_scream_male", "ped_scream_female", "telolet", "smash", "slip", "boom", "nitro", "siren", "pickup"]
+			var sfx_req := ["intro_fanfare", "countdown_beep", "race_go", "engine_idle", "engine_loop", "wind_loop", "birds_ambience", "horn_klakson", "crash_heavy", "crash_kart", "bonk", "chicken_scream", "ped_scream_male", "ped_scream_female", "telolet", "smash", "slip", "boom", "nitro", "siren", "pickup", "rocket_launch", "rocket_explosion"]
 			var sfx_ok := true
 			var mp3_loaded := 0
 			for sname in sfx_req:
 				var st := ComedySfx.get_stream(sname)
 				if st == null or st.get_length() <= 0.05:
 					sfx_ok = false
-				elif st is AudioStreamMP3:
+				elif st is AudioStreamMP3 or st is AudioStreamOggVorbis:
 					mp3_loaded += 1
+			# Verify Idle vs Running engine separation and steady speed-based pitch (Up arrow)
+			pk.controls_locked = false
+			pk.nitro_active = false
+			pk.current_throttle_input = 0.0
+			pk.forward_speed = 0.0
+			for _f in range(90):
+				pk._update_engine_audio(1.0 / 60.0)
+			var idle_db_at_idle: float = pk.engine_idle_player.volume_db
+			var roar_db_at_idle: float = pk.engine_player.volume_db
+			pk.current_throttle_input = 1.0
+			pk.forward_speed = 15.0
+			for _f in range(90):
+				pk._update_engine_audio(1.0 / 60.0)
+			var mid_pitch: float = pk.engine_player.pitch_scale
+			var mid_roar_db: float = pk.engine_player.volume_db
+			var mid_idle_db: float = pk.engine_idle_player.volume_db
+			pk.forward_speed = pk.max_speed
+			for _f in range(90):
+				pk._update_engine_audio(1.0 / 60.0)
+			var p_min: float = 99.0
+			var p_max: float = -99.0
+			for _f in range(30):
+				pk._update_engine_audio(1.0 / 60.0)
+				p_min = minf(p_min, pk.engine_player.pitch_scale)
+				p_max = maxf(p_max, pk.engine_player.pitch_scale)
+			var top_pitch: float = pk.engine_player.pitch_scale
+			var top_spread: float = p_max - p_min
+			var engine_curve_ok: bool = (idle_db_at_idle > -12.0) and (roar_db_at_idle <= -50.0) and (mid_idle_db <= -50.0) and (mid_roar_db > -18.0) and (top_pitch > mid_pitch + 0.35) and (top_spread < 0.01)
 			var name_ok: bool = (pk.racer_name == GameConfig.get_clean_player_name())
-			print("VERIFY audio: engine_node=%s sfx_all_valid=%s mp3_loaded=%d/%d total_sfx=%d player_name=%s name_ok=%s" % [str(has_engine_audio), str(sfx_ok), mp3_loaded, sfx_req.size(), ComedySfx.get_registered_names().size(), pk.racer_name, str(name_ok)])
-			if kcount != 8 or track_len < 650.0 or not has_tunnel or bumps < 4 or not has_thin_hood or not has_pillar_a or not has_grille or not has_shocks or not has_arms or not arms_moved or not wheels_steered or not crossed_from_park or not reverse_ok or not has_engine_audio or not sfx_ok or mp3_loaded < sfx_req.size() or not name_ok:
+			print("VERIFY audio: engine_node=%s sfx_all_valid=%s assets_loaded=%d/%d idle(idle=%.1fdB roar=%.1fdB) run(idle=%.1fdB roar=%.1fdB midP=%.2f topP=%.2f spread=%.4f) curve_ok=%s player_name=%s name_ok=%s" % [str(has_engine_audio), str(sfx_ok), mp3_loaded, sfx_req.size(), idle_db_at_idle, roar_db_at_idle, mid_idle_db, mid_roar_db, mid_pitch, top_pitch, top_spread, str(engine_curve_ok), pk.racer_name, str(name_ok)])
+			if kcount != 8 or track_len < 650.0 or not has_tunnel or bumps < 4 or not has_thin_hood or not has_pillar_a or not has_grille or not has_shocks or not has_arms or not arms_moved or not wheels_steered or not crossed_from_park or not reverse_ok or not has_engine_audio or not sfx_ok or mp3_loaded < sfx_req.size() or not engine_curve_ok or not name_ok:
 				push_error("VERIFICATION ASSERTION FAILED on race_track!")
 				get_tree().quit(2)
 				return
 		elif path.ends_with("battle_arena.tscn"):
 			var bcount: int = inst.karts.size()
 			var icount: int = inst.world_builder.item_boxes.size()
-			print("VERIFY battle_arena: combat_karts=%d items=%d" % [bcount, icount])
-			if bcount != 8:
-				push_error("VERIFICATION ASSERTION FAILED on battle_arena!")
+			# Verify Ring-Out rule: throwing player outside arena immediately marks kalah (hp=0, match_ended=true, no floating)
+			var bp: KartController = inst.player_kart
+			bp.global_position = Vector3(41.5, 1.0, 0.0)
+			for _t in range(4):
+				await get_tree().physics_frame
+			await get_tree().process_frame
+			var ringout_ok: bool = (bp.hp <= 0.0) and inst.player_ringed_out and inst.match_ended and bp.velocity.length() < 0.01 and ("KALAH" in inst.hud_banner.text)
+			print("VERIFY battle_arena: combat_karts=%d items=%d ringout_kalah=%s banner='%s'" % [bcount, icount, str(ringout_ok), inst.hud_banner.text])
+			if bcount != 8 or not ringout_ok:
+				push_error("VERIFICATION ASSERTION FAILED on battle_arena Ring-Out!")
 				get_tree().quit(3)
 				return
 		else:
